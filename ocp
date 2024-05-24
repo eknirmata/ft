@@ -1,0 +1,58 @@
+import csv
+from kubernetes import client
+from openshift.dynamic import DynamicClient
+from openshift.helper.userpassauth import OCPLoginConfiguration
+
+# Function to login to a given cluster
+def login_to_cluster(apihost, username, password):
+    kubeConfig = OCPLoginConfiguration(ocp_username=username, ocp_password=password)
+    kubeConfig.host = apihost
+    kubeConfig.verify_ssl = True
+    kubeConfig.ssl_ca_cert = './ocp.pem'  # Use a certificate bundle for the TLS validation
+    kubeConfig.get_token()  # Retrieve the auth token
+    return client.ApiClient(kubeConfig)
+
+# Function to list projects in a cluster
+def get_projects(dyn_client):
+    v1_projects = dyn_client.resources.get(api_version='project.openshift.io/v1', kind='Project')
+    return v1_projects.get()
+
+# Function to get pod information from a project
+def get_pods_info(dyn_client, project_name):
+    v1_pods = dyn_client.resources.get(api_version='v1', kind='Pod')
+    pod_list = v1_pods.get(namespace=project_name)
+    pods_info = []
+    for pod in pod_list.items:
+        pods_info.append({
+            'pod_name': pod.metadata.name,
+            'pod_image': pod.spec.containers[0].image,  # Assuming first container image is needed
+            'create_time': pod.metadata.creationTimestamp
+        })
+    return pods_info
+
+# Prepare the CSV file for writing the output
+with open('cluster_projects_pods.csv', mode='w', newline='') as file:
+    fieldnames = ['cluster', 'project_name', 'pod_name', 'pod_image', 'create_time']
+    writer = csv.DictWriter(file, fieldnames=fieldnames)
+    writer.writeheader()  # Write the header
+
+    # Read the CSV file and loop through the clusters
+    with open('clusters.csv', mode='r') as csvfile:
+        csvreader = csv.DictReader(csvfile)
+        for row in csvreader:
+            k8s_client = login_to_cluster(row['apihost'], row['username'], row['password'])
+            dyn_client = DynamicClient(k8s_client)
+            project_list = get_projects(dyn_client)
+
+            for project in project_list.items:
+                project_name = project.metadata.name
+                pods_info = get_pods_info(dyn_client, project_name)
+
+                for pod_info in pods_info:
+                    writer.writerow({
+                        'cluster': row['apihost'],
+                        'project_name': project_name,
+                        'pod_name': pod_info['pod_name'],
+                        'pod_image': pod_info['pod_image'],
+                        'create_time': pod_info['create_time']
+                    })
