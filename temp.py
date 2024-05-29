@@ -2,7 +2,9 @@ import csv
 from kubernetes import client
 from openshift.dynamic import DynamicClient
 from openshift.helper.userpassauth import OCPLoginConfiguration
+import urllib3
 
+urllib3.disable_warnings()
 
 def read_cluster_info(file_path):
     with open(file_path, 'r') as file:
@@ -53,13 +55,12 @@ def get_events(dyn_client):
     v1_events = dyn_client.resources.get(api_version='v1', kind='Event')
     return v1_events.get()
 
-def write_output_to_csv(cluster, project_list, event_list, file_path):
+def write_output_to_csv(cluster, event_list, file_path):
     with open(file_path, 'w', newline='') as outfile:
         writer = csv.writer(outfile)
-        writer.writerow(['Cluster', 'Project', 'Event'])
-        for project in project_list.items:
-            for event in event_list.items:
-                writer.writerow([cluster, project.metadata.name, event.metadata.name])
+        writer.writerow(['Cluster', 'Count', 'FirstTimestamp', 'LastTimestamp', 'Namespace', 'Name', 'Kind', 'Component', 'Reason', 'Message'])
+        for event in event_list.items:
+            writer.writerow([cluster, event.count, event.firstTimestamp, event.lastTimestamp, event.involvedObject.namespace, event.involvedObject.name, event.involvedObject.kind, event.source.component, event.reason, event.message])
 
 def main():
     for cluster, apihost, username, password in read_cluster_info('clusters.csv'):
@@ -67,9 +68,8 @@ def main():
         if kubeConfig is not None:
             dyn_client = get_dyn_client(kubeConfig)
             if is_cluster_reachable(dyn_client):
-                project_list = get_projects(dyn_client)
                 event_list = get_events(dyn_client)
-                write_output_to_csv(cluster, project_list, event_list, 'output.csv')
+                write_output_to_csv(cluster, event_list, 'output.csv')
 
 if __name__ == "__main__":
     main()
